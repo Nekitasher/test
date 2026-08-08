@@ -1,111 +1,32 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram Poker</title>
-    <!-- Подключаем официальный скрипт Telegram Web App -->
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        body {
-            background-color: #1a4314; /* Сукно покерного стола */
-            color: white;
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 20px;
-            margin: 0;
-        }
-        .table {
-            background: #0f2b0b;
-            border: 5px solid #d4af37;
-            border-radius: 20px;
-            padding: 20px;
-            margin-top: 20px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
-        }
-        .cards {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin: 15px 0;
-        }
-        .card {
-            background: white;
-            color: black;
-            font-size: 24px;
-            font-weight: bold;
-            width: 50px;
-            height: 75px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        }
-        .controls {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-top: 25px;
-        }
-        button {
-            background: #d4af37;
-            border: none;
-            color: #0f2b0b;
-            padding: 12px;
-            font-size: 16px;
-            font-weight: bold;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        button:active {
-            transform: scale(0.95);
-        }
-        .btn-fold { background: #c0392b; color: white; }
-    </style>
-</head>
-<body>
+<script>
+    let tg = window.Telegram.WebApp;
+    tg.expand();
 
-    <h2>🃏 Покерный Стол</h2>
-    <p id="user-info">Игрок: Загрузка...</p>
+    let playerName = tg.initDataUnsafe?.user?.first_name || "Неизвестный";
+    document.getElementById('user-info').innerText = "Игрок: " + playerName;
 
-    <div class="table">
-        <p>Общие карты (Флоп / Тёрн / Ривер):</p>
-        <div class="cards" id="community-cards">
-            <div class="card">🂠</div>
-            <div class="card">🂠</div>
-            <div class="card">🂠</div>
-        </div>
-        <p>Банк: <span id="pot-amount">0</span> фишек</p>
-    </div>
+    // Получаем ID комнаты из URL (например: ?room=1234abcd)
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room');
 
-    <h3>Ваши карты:</h3>
-    <div class="cards">
-        <div class="card" id="my-card-1">A♠</div>
-        <div class="card" id="my-card-2">K♥</div>
-    </div>
+    // Подключаемся к нашему FastAPI серверу
+    // wss:// используется для защищенного соединения (обязательно для Telegram)
+    const ws = new WebSocket(`wss://your-domain.com/ws/${roomId}`);
 
-    <div class="controls">
-        <button class="btn-fold" onclick="makeAction('Fold')">Фолд</button>
-        <button onclick="makeAction('Check')">Чек</button>
-        <button onclick="makeAction('Call')">Колл</button>
-        <button onclick="makeAction('Raise')">Рейз (+50)</button>
-    </div>
-
-    <script>
-        // Инициализация Telegram Web App
-        let tg = window.Telegram.WebApp;
-        tg.expand(); // Разворачиваем на весь экран
-
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-            document.getElementById('user-info').innerText = "Игрок: " + tg.initDataUnsafe.user.first_name;
+    ws.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        if (data.type === "update") {
+            console.log("Обновление стола:", data.message);
+            // Здесь код обновления UI (смена карт, изменение банка и т.д.)
         }
+    };
 
-        function makeAction(action) {
-            alert("Вы выбрали действие: " + action);
-            // Здесь можно отправлять данные обратно боту через tg.sendData() или fetch-запрос на ваш сервер
-        }
-    </script>
-</body>
-</html>
+    function makeAction(actionType) {
+        // Отправляем действие на сервер, а не локально
+        const action = {
+            player: playerName,
+            action: actionType
+        };
+        ws.send(JSON.stringify(action));
+    }
+</script>
