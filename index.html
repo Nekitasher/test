@@ -1,32 +1,154 @@
-<script>
-    let tg = window.Telegram.WebApp;
-    tg.expand();
-
-    let playerName = tg.initDataUnsafe?.user?.first_name || "Неизвестный";
-    document.getElementById('user-info').innerText = "Игрок: " + playerName;
-
-    // Получаем ID комнаты из URL (например: ?room=1234abcd)
-    const urlParams = new URLSearchParams(window.location.search);
-    const roomId = urlParams.get('room');
-
-    // Подключаемся к нашему FastAPI серверу
-    // wss:// используется для защищенного соединения (обязательно для Telegram)
-    const ws = new WebSocket(`wss://your-domain.com/ws/${roomId}`);
-
-    ws.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        if (data.type === "update") {
-            console.log("Обновление стола:", data.message);
-            // Здесь код обновления UI (смена карт, изменение банка и т.д.)
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VIP Poker</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-dark: #121418;
+            --table-center: #276b45;
+            --table-edge: #18422a;
+            --table-border: #a88742;
+            --panel-bg: #1e2228;
+            --text-main: #f0f0f0;
+            --text-muted: #8b929a;
+            --gold: #d4af37;
+            --gold-glow: rgba(212, 175, 55, 0.4);
         }
-    };
+        
+        body { background-color: var(--bg-dark); color: var(--text-main); font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; margin: 0; padding: 12px; user-select: none; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .header h3 { margin: 0; color: var(--gold); font-size: 20px; text-transform: uppercase; letter-spacing: 1px;}
+        
+        .log-box { background: rgba(0, 0, 0, 0.4); color: #4ade80; padding: 12px; border-radius: 10px; margin-bottom: 15px; font-size: 13px; text-align: center; border: 1px solid rgba(74, 222, 128, 0.2); }
 
-    function makeAction(actionType) {
-        // Отправляем действие на сервер, а не локально
-        const action = {
-            player: playerName,
-            action: actionType
+        /* Красивый стол */
+        .table { background: radial-gradient(circle at center, var(--table-center), var(--table-edge)); border: 6px solid var(--table-border); border-radius: 40px; padding: 25px 15px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.6), inset 0 0 20px rgba(0,0,0,0.5); text-align: center; position: relative; }
+        .pot-info { background: rgba(0,0,0,0.5); padding: 8px 15px; border-radius: 20px; display: inline-block; font-weight: bold; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); }
+        .pot-info span { color: var(--gold); }
+        
+        .cards { display: flex; justify-content: center; gap: 8px; min-height: 75px; }
+        .card { background: white; color: black; font-size: 24px; width: 52px; height: 75px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.4); position: relative; }
+        .card.red { color: #e74c3c; }
+
+        /* Список игроков */
+        .players-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+        .player-item { background: var(--panel-bg); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(255,255,255,0.05); transition: all 0.3s ease; }
+        .player-info { display: flex; flex-direction: column; text-align: left; }
+        .player-name { font-weight: bold; font-size: 15px; }
+        .player-chips { color: var(--text-muted); font-size: 13px; }
+        .player-action { background: rgba(255,255,255,0.1); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        
+        /* Подсветка активного игрока */
+        .is-turn { background: #262b33; border-color: var(--gold); box-shadow: 0 0 15px var(--gold-glow); transform: scale(1.02); z-index: 10; }
+        .is-turn .player-name { color: var(--gold); }
+
+        .my-hand-title { font-size: 14px; color: var(--text-muted); margin-bottom: 8px; text-align: center; text-transform: uppercase; letter-spacing: 1px; }
+
+        /* Кнопки управления */
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
+        button { background: #34495e; color: white; border: none; padding: 14px; font-size: 15px; font-weight: bold; border-radius: 10px; cursor: pointer; transition: 0.2s; text-transform: uppercase; }
+        button:active { transform: translateY(2px); }
+        button:disabled { background: #1e2228; color: #555; cursor: not-allowed; box-shadow: none; border: 1px solid #333; }
+        
+        #btn-fold { background: #c0392b; }
+        #btn-call { background: #2980b9; }
+        #btn-raise { background: #27ae60; }
+        #btn-start { background: var(--gold); color: #000; grid-column: span 2; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h3>VIP Poker</h3>
+        <span style="color: var(--text-muted); font-size: 13px;" id="my-name">...</span>
+    </div>
+    
+    <div class="log-box" id="game-log">Подключение к столу...</div>
+
+    <div class="table">
+        <div class="pot-info">Банк: <span id="pot">0</span> | Ставка: <span id="current-bet">0</span></div>
+        <div class="cards" id="board"></div>
+    </div>
+
+    <div class="players-list" id="players"></div>
+
+    <div class="my-hand-title">Ваши карты</div>
+    <div class="cards" id="my-cards"></div>
+
+    <div class="controls">
+        <button id="btn-fold" onclick="sendAction('fold')">Фолд</button>
+        <button id="btn-check" onclick="sendAction('check')">Чек</button>
+        <button id="btn-call" onclick="sendAction('call')">Колл</button>
+        <button id="btn-raise" onclick="sendAction('raise')">Рейз (+50)</button>
+        <button id="btn-start" onclick="sendAction('start')" style="display:none;">Начать раздачу</button>
+    </div>
+
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+        let playerName = tg.initDataUnsafe?.user?.first_name || ("Игрок" + Math.floor(Math.random()*1000));
+        document.getElementById('my-name').innerText = playerName;
+
+        const roomId = new URLSearchParams(window.location.search).get('room') || 'test';
+        const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/${roomId}`;
+        const ws = new WebSocket(wsUrl);
+
+        function formatCard(c) {
+            if (!c) return '';
+            let val = c[0].toUpperCase();
+            if (val === 'T') val = '10';
+            let suit = c[1];
+            let color = (suit === 'h' || suit === 'd') ? 'red' : 'black';
+            let suitSym = {'s':'♠', 'h':'♥', 'd':'♦', 'c':'♣'}[suit];
+            return `<div class="card ${color}">${val}${suitSym}</div>`;
+        }
+
+        function setButtonsState(isMyTurn, phase) {
+            const btns = ['btn-fold', 'btn-check', 'btn-call', 'btn-raise'];
+            btns.forEach(id => {
+                document.getElementById(id).disabled = !isMyTurn || phase === "waiting";
+            });
+            document.getElementById('btn-start').style.display = phase === "waiting" ? "block" : "none";
+        }
+
+        ws.onopen = () => ws.send(JSON.stringify({player: playerName}));
+
+        ws.onmessage = function(event) {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "state") {
+                const state = msg.data;
+                document.getElementById('pot').innerText = state.pot;
+                document.getElementById('current-bet').innerText = state.current_bet;
+                document.getElementById('game-log').innerText = state.log;
+                
+                document.getElementById('board').innerHTML = state.board.map(formatCard).join('');
+                document.getElementById('my-cards').innerHTML = state.my_cards.map(formatCard).join('');
+                
+                document.getElementById('players').innerHTML = state.players.map(p => {
+                    const turnClass = p.is_turn ? 'is-turn' : '';
+                    let statusText = p.folded ? 'Сбросил' : (p.bet > 0 ? `Ставка: ${p.bet}` : 'В игре');
+                    if (p.chips === 0 && !p.folded) statusText = 'ALL-IN!';
+                    
+                    return `
+                    <div class="player-item ${turnClass}">
+                        <div class="player-info">
+                            <span class="player-name">${p.is_me ? '(Вы) ' : ''}${p.name}</span>
+                            <span class="player-chips">Фишек: ${p.chips}</span>
+                        </div>
+                        <div class="player-action">${statusText}</div>
+                    </div>`;
+                }).join('');
+
+                setButtonsState(state.is_my_turn, state.phase);
+            }
         };
-        ws.send(JSON.stringify(action));
-    }
-</script>
+
+        function sendAction(action) {
+            ws.send(JSON.stringify({action: action}));
+        }
+    </script>
+</body>
+</html>
